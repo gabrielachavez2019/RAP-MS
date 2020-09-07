@@ -1,0 +1,789 @@
+#VennDiagram
+#install.packages("VennDiagram","ggplot2")
+library(ggplot2)
+library(VennDiagram)
+#install.packages("yarr")
+library(yarrr)
+library(RColorBrewer)
+myCol <- brewer.pal(3, "Pastel2")
+
+#getwd()
+##Set as working directory in order to read files
+setwd("~/_KSHV_Project/RAP-MS")
+#Get data from original files MS and FA
+MS_A <- read.csv("MS_A.csv", TRUE, ",")
+MS_B <- read.csv("MS_B.csv", TRUE, ",")
+MS_C <- read.csv("MS_C.csv", TRUE, ",")
+
+FA_A <- read.csv("FA_A.csv", TRUE, ",")
+FA_B <- read.csv("FA_B.csv", TRUE, ",")
+FA_C <- read.csv("FA_C.csv", TRUE, ",")
+
+#Read a table from the bash script with all  the SCORES associated to 
+#the same raw, different columns = different samples (to be compared)
+Scores_all <- read.table("ScoresMatrix.tex", 
+                         header = TRUE, na.strings = "NA")
+
+class(Scores_all)
+summary(Scores_all)
+#plot(Scores_all)
+
+Scores.matrix <-data.matrix(Scores_all)
+pca <- prcomp(t(Scores.matrix[,2:7]), scale=TRUE) 
+## plot pc1 and pc2
+plot(pca$x[,1], pca$x[,2])
+## make a scree plot
+pca.var <- pca$sdev^2
+pca.var.per <- round(pca.var/sum(pca.var)*100, 1)
+
+barplot(pca.var.per, main="Scree Plot", xlab="Principal Component", ylab="Percent Variation")
+
+## now make a fancy looking plot that shows the PCs and the variation:
+library(ggplot2)
+
+pca.data <- data.frame(Sample=rownames(pca$x),
+                       X=pca$x[,1],
+                       Y=pca$x[,2])
+pca.data
+
+ggplot(data=pca.data, aes(x=X, y=Y, label=Sample)) +
+  geom_text() +
+  xlab(paste("PC1 - ", pca.var.per[1], "%", sep="")) +
+  ylab(paste("PC2 - ", pca.var.per[2], "%", sep="")) +
+  theme_bw() +
+  ggtitle("My PCA Graph")
+
+## get the name of the top 10 measurements (genes) that contribute
+## most to pc1.
+loading_scores <- pca$rotation[,1]
+gene_scores <- abs(loading_scores) ## get the magnitudes
+gene_score_ranked <- sort(gene_scores, decreasing=TRUE)
+top_10_genes <- names(gene_score_ranked[1:10])
+
+top_10_genes ## show the names of the top 10 genes
+
+pca$rotation[top_10_genes,1] ## show the scores (and +/- sign)
+
+#######
+##
+## NOTE: Everything that follow is just bonus stuff.
+## It simply demonstrates how to get the same
+## results using "svd()" (Singular Value Decomposition) or using "eigen()"
+## (Eigen Decomposition).
+##
+#######
+
+############################################
+##
+## Now let's do the same thing with svd()
+##
+## svd() returns three things
+## v = the "rotation" that prcomp() returns, this is a matrix of eigenvectors
+##     in other words, a matrix of loading scores
+## u = this is similar to the "x" that prcomp() returns. In other words,
+##     sum(the rotation * the original data), but compressed to the unit vector
+##     You can spread it out by multiplying by "d"
+## d = this is similar to the "sdev" value that prcomp() returns (and thus
+##     related to the eigen values), but not
+##     scaled by sample size in an unbiased way (ie. 1/(n-1)).
+##     For prcomp(), sdev = sqrt(var) = sqrt(ss(fit)/(n-1))
+##     For svd(), d = sqrt(ss(fit))
+##
+############################################
+
+svd.stuff <- svd(scale(t(data.matrix), center=TRUE))
+
+## calculate the PCs
+svd.data <- data.frame(Sample=colnames(data.matrix),
+                       X=(svd.stuff$u[,1] * svd.stuff$d[1]),
+                       Y=(svd.stuff$u[,2] * svd.stuff$d[2]))
+svd.data
+
+## alternatively, we could compute the PCs with the eigen vectors and the
+## original data
+svd.pcs <- t(t(svd.stuff$v) %*% t(scale(t(data.matrix), center=TRUE)))
+svd.pcs[,1:2] ## the first to principal components
+
+svd.df <- ncol(data.matrix) - 1
+svd.var <- svd.stuff$d^2 / svd.df
+svd.var.per <- round(svd.var/sum(svd.var)*100, 1)
+
+ggplot(data=svd.data, aes(x=X, y=Y, label=Sample)) +
+  geom_text() +
+  xlab(paste("PC1 - ", svd.var.per[1], "%", sep="")) +
+  ylab(paste("PC2 - ", svd.var.per[2], "%", sep="")) +
+  theme_bw() +
+  ggtitle("svd(scale(t(data.matrix), center=TRUE)")
+
+############################################
+##
+## Now let's do the same thing with eigen()
+##
+## eigen() returns two things...
+## vectors = eigen vectors (vectors of loading scores)
+##           NOTE: pcs = sum(loading scores * values for sample)
+## values = eigen values
+##
+############################################
+cov.mat <- cov(scale(t(data.matrix), center=TRUE))
+dim(cov.mat)
+
+## since the covariance matrix is symmetric, we can tell eigen() to just
+## work on the lower triangle with "symmetric=TRUE"
+eigen.stuff <- eigen(cov.mat, symmetric=TRUE)
+dim(eigen.stuff$vectors)
+head(eigen.stuff$vectors[,1:2])
+
+eigen.pcs <- t(t(eigen.stuff$vectors) %*% t(scale(t(data.matrix), center=TRUE)))
+eigen.pcs[,1:2]
+
+eigen.data <- data.frame(Sample=rownames(eigen.pcs),
+                         X=(-1 * eigen.pcs[,1]), ## eigen() flips the X-axis in this case, so we flip it back
+                         Y=eigen.pcs[,2]) ## X axis will be PC1, Y axis will be PC2
+eigen.data
+
+eigen.var.per <- round(eigen.stuff$values/sum(eigen.stuff$values)*100, 1)
+
+ggplot(data=eigen.data, aes(x=X, y=Y, label=Sample)) +
+  geom_text() +
+  xlab(paste("PC1 - ", eigen.var.per[1], "%", sep="")) +
+  ylab(paste("PC2 - ", eigen.var.per[2], "%", sep="")) +
+  theme_bw() +
+  ggtitle("eigen on cov(t(data.matrix))")
+
+
+##Back to the main comparisons:
+class(MS_A)
+barplot(MS_A$Score)
+head(MS_A)
+MS_A$
+plot(MS_A$ProteinID, MS_A$Score)
+
+barplot(MS_B$Score)
+
+Norm_Score <- log(MS_A$Score,2)
+MS_A.new <- cbind(MS_A,Norm_Score)
+head(MS_A.new)
+
+plot(MS_A.new$Coverage)
+
+ID.A <- (MS_A$ProteinID)
+ID.B <- (MS_B$ProteinID)
+ID.C <- (MS_A$ProteinID)
+
+#ID.A!=ID.B
+ID.AB <- Reduce(intersect, list(MS_A$ProteinID,MS_B$ProteinID))
+head(ID.AB)
+
+#Show summary output
+tail(MS_A)
+tail(MS_B)
+tail(MS_C)
+#Shwo the header of all the MS samples
+head(MS_A)
+head(MS_B)
+head(MS_C)
+
+#To create a matrix
+#Order raws
+#MS_A.sorted <- sort(MS_A$ProteinID)
+summary(MS_A)
+#cor(MS_A[1:200,2], MS_B[1:200,2])
+cor(MS_A[1:2000,2], MS_B[1:2000,2])
+
+plot(MS_A[1:2384,5], FA_A[1:2384,5], 
+     col=2, 
+     pch=16,
+     cex=1,
+     #xlim = c(0,15000), 
+     #ylim = c(0,10000),
+     xlab = "X", 
+     ylab = "S",
+     main = "Correlations")
+  points(MS_B[1:2384,5], FA_B[1:2384,5],
+  pch = 16,
+  cex= 1,
+  col=3
+  #col = "pink")
+  #col = transparent("pink", trans.val = .8))
+  #col = brewer.pal(8, "Pastel2"))
+  )
+  points(MS_C[1:2384,5], FA_C[1:2384,5],
+         pch = 16,
+         cex=1,
+         #col = brewer.pal(9, "Pastel1")
+         col=4)
+
+  # Prepare a palette of 3 colors with R colorbrewer:
+  #library(RColorBrewer)
+  myCol <- brewer.pal(3, "Pastel2")
+  #myCol2 <- brewer.pal(2, "Pastel2")
+  
+#Venndiagram for MS
+venn.diagram(
+x= list(MS_A$ProteinID,MS_B$ProteinID, MS_C$ProteinID),
+category.names = c("Domain I","Domain II","Domain III"),
+filename = "HERE.png",
+output=TRUE,
+# Output features
+imagetype="png" ,
+height = 480 , 
+width = 480 , 
+resolution = 300,
+compression = "lzw",
+
+# Circles
+lwd = 2,
+lty = 'blank',
+fill = myCol,
+
+# Numbers
+cex = .6,
+fontface = "bold",
+fontfamily = "sans",
+# Set names
+cat.cex = 0.6,
+cat.fontface = "bold",
+cat.default.pos = "outer",
+cat.pos = c(-27, 27, 135),
+cat.dist = c(0.055, 0.055, 0.085),
+cat.fontfamily = "sans",
+rotation = 1
+)
+
+#Venndiagram for FA
+venn.diagram(
+  x= list(FA_A$ProteinID,FA_B$ProteinID, FA_C$ProteinID),
+  category.names = c("Domain I","Domain II","Domain III"),
+  filename = "test_vennFA.png",
+  output=TRUE,
+  
+  # Output features
+  imagetype="png" ,
+  height = 480 , 
+  width = 480 , 
+  resolution = 300,
+  compression = "lzw",
+  
+  # Circles
+  lwd = 2,
+  lty = 'blank',
+  fill = myCol,
+  
+  
+  # Numbers
+  cex = .6,
+  fontface = "bold",
+  fontfamily = "sans",
+  # Set names
+  cat.cex = 0.6,
+  cat.fontface = "bold",
+  cat.default.pos = "outer",
+  cat.pos = c(-27, 27, 135),
+  cat.dist = c(0.055, 0.055, 0.085),
+  cat.fontfamily = "sans",
+  rotation = 1
+)
+
+
+#Venndiagram all
+venn.diagram(
+  x= list(FA_A$ProteinID,MS_A$ProteinID),
+  category.names = c("I-FA","I-MS"),
+  filename = "HERE_vennI.png",
+  output=TRUE,
+  
+  # Output features
+  imagetype="png" ,
+  height = 480 , 
+  width = 480 , 
+  resolution = 300,
+  compression = "lzw",
+  
+  # Circles with color
+  lwd = 1,
+  lty = 'blank',
+  fill = c('#21908dff', '#fde725ff'),
+  
+  #Soften colors
+  #col = c('#21908dff', '#fde725ff'), 
+  #fill = c(alpha('#21908dff',0.3), alpha('#fde725ff',0.3)),
+  
+  # Numbers
+  cex = 0.83,
+  #fontface = "bold",
+  fontfamily = "sans",
+  
+  # Set names
+  cat.cex = 0.4,
+  cat.fontface = "bold",
+  #cat.default.pos = "outer",
+  #cat.pos = c(-20, 20),
+  #cat.dist = c(0.09, 0.09),
+  cat.fontfamily = "sans"
+  #rotation = 1
+)
+
+
+#Venndiagram all
+venn.diagram(
+  x= list(FA_B$ProteinID,MS_B$ProteinID),
+  category.names = c("II-FA","II-MS"),
+  filename = "HERE_vennII.png",
+  output=TRUE,
+  
+  # Output features
+  imagetype="png" ,
+  height = 480 , 
+  width = 480 , 
+  resolution = 300,
+  compression = "lzw",
+  
+  # Circles with color
+  lwd = 1,
+  lty = 'blank',
+  fill = c('#21908dff', '#fde725ff'),
+  
+  #Soften colors
+  #col = c('#21908dff', '#fde725ff'), 
+  #fill = c(alpha('#21908dff',0.3), alpha('#fde725ff',0.3)),
+  
+  # Numbers
+  cex = 0.83,
+  #fontface = "bold",
+  fontfamily = "sans",
+  
+  # Set names
+  cat.cex = 0.4,
+  cat.fontface = "bold",
+  #cat.default.pos = "outer",
+  #cat.pos = c(-20, 20),
+  #cat.dist = c(0.09, 0.09),
+  cat.fontfamily = "sans"
+  #rotation = 1
+)
+
+#Venndiagram all
+venn.diagram(
+  x= list(FA_C$ProteinID,MS_C$ProteinID),
+  category.names = c("III-FA","III-MS"),
+  filename = "HERE_vennIII.png",
+  output=TRUE,
+  
+  # Output features
+  imagetype="png" ,
+  height = 480 , 
+  width = 480 , 
+  resolution = 300,
+  compression = "lzw",
+  
+  # Circles with color
+  lwd = 1,
+  lty = 'blank',
+  fill = c('#21908dff', '#fde725ff'),
+  
+  #Soften colors
+  #col = c('#21908dff', '#fde725ff'), 
+  #fill = c(alpha('#21908dff',0.3), alpha('#fde725ff',0.3)),
+  
+  # Numbers
+  cex = 0.83,
+  #fontface = "bold",
+  fontfamily = "sans",
+  
+  # Set names
+  cat.cex = 0.4,
+  cat.fontface = "bold",
+  #cat.default.pos = "outer",
+  #cat.pos = c(-20, 20),
+  #cat.dist = c(0.09, 0.09),
+  cat.fontfamily = "sans"
+  #rotation = 1
+)
+
+#Venndiagram for MS
+venn.diagram(
+  x= list(MS_A$ProteinID,MS_B$ProteinID, FA_A$ProteinID,FA_B$ProteinID),
+  category.names = c("Domain I-MS","Domain II-MS","Domain I-FA","Domain II-FA"),
+  filename = "test_vennAB.png",
+  output=TRUE
+)
+
+venn.diagram(
+  x= list(MS_C$ProteinID,MS_B$ProteinID, FA_C$ProteinID,FA_B$ProteinID),
+  category.names = c("Domain III-MS","Domain II-MS","Domain III-FA","Domain II-FA"),
+  filename = "test_vennBC.png",
+  output=TRUE
+)
+
+
+pca.var <- pca$sdev^2
+pca.var.per <- round(pca.var/sum(pca.var)*100, 1)
+
+barplot(pca.var.per, main="Scree Plot", xlab="Principal Component", ylab="Percent Variation")
+
+## now make a fancy looking plot that shows the PCs and the variation:
+library(ggplot2)
+
+pca.data <- data.frame(Sample=rownames(pca$x),
+                       X=pca$x[,1],
+                       Y=pca$x[,2])
+pca.data
+
+ggplot(data=pca.data, aes(x=X, y=Y, label=Sample)) +
+  geom_text() +
+  xlab(paste("PC1 - ", pca.var.per[1], "%", sep="")) +
+  ylab(paste("PC2 - ", pca.var.per[2], "%", sep="")) +
+  theme_bw() +
+  ggtitle("My PCA Graph")
+
+
+plot(MS_A[730:2215,5], FA_A[730:2215,5], 
+     col=2, 
+     pch=16,
+     cex=1,
+     xlim = c(0,100), 
+     ylim = c(0,100),
+     xlab = "MS", 
+     ylab = "FA",
+     main = "Correlations")
+points(MS_B[730:2215,5], FA_B[730:2215,5],
+       pch = 16,
+       cex= 1,
+       col=3
+       #col = "pink")
+       #col = transparent("pink", trans.val = .8))
+       #col = brewer.pal(8, "Pastel2"))
+)
+points(MS_C[730:2215,5], FA_C[730:2215,5],
+       pch = 16,
+       cex=1,
+       #col = brewer.pal(9, "Pastel1")
+       col=4)
+head(Scores_all)
+head(Scores.matrix)
+barplot(Scores.matrix[731:991,2:7])
+Scores.matrix[731:991,2:7]
+
+Scores.norm2 <- log2(Scores.matrix[,2:7])
+rownames(Scores.matrix) <- Scores_all$ProteinID
+
+#Plot
+plot(Scores.norm2,  
+     pch=16,
+     cex=1,
+     col="grey",
+     #xlim = c(4,10), 
+     #ylim = c(4,10),
+     xlab = "UV", 
+     ylab = "FA",
+     main = "Pseudouridine"
+     #xaxt = "n",
+     #yaxt = "n"
+     )
+points(head(Scores.norm2),
+       pch = 16,
+       cex=2,
+       #col = brewer.pal(9, "Pastel1")
+       col=4)
+
+points(Scores.norm2[77:79,],
+       pch = 16,
+       cex=2,
+       col="purple")
+points(Scores.norm2[11:13,],
+       pch = 16,
+       cex=2,
+       #col = brewer.pal(9, "Pastel1")
+       col="purple")
+#Optional, text in the marked circles
+text(9,10, "SND1")
+text(9.9,9.5, "HNRPC")
+text(10.9,10.3, "YTHD2")
+text(7.6,8 ,"RBM15")
+text(8.5,7.9,"FTO")
+
+
+#Plotting: 
+#RBM15
+#FTO
+#SND1
+#HNRPC
+#YTHD2
+points(head(Scores.norm2),
+       pch = 16,
+       cex=2,
+       #col = brewer.pal(9, "Pastel1")
+       col=3)
+text(9,8.3, "RPUSD2")
+text(9.7,10, "GAR1")
+text(10,10.5, "PUS7")
+text(10.2,10, "NOP10")
+text(10.3,10.9, "NHP2")
+text(11,10.98, "DKC1")
+
+boxplot(Scores.norm2)
+plot(Scores_all$ProteinID)
+
+
+#####################
+##To estimate the fold change for Domain A using FA and MS mascot scores
+A <- ((Scores.matrix[,2]+Scores.matrix[,5])/2)
+B <- ((Scores.matrix[,3]+Scores.matrix[,6])/2)
+C <- ((Scores.matrix[,4]+Scores.matrix[,7])/2)
+ProteinID <- Scores_all[,1]
+FoldChange <- cbind.data.frame(ProteinID, A, B, C)
+
+write.table(FoldChange, "FoldChange.txt", sep="\t")
+
+FoldChange <- read.table("FoldChange.txt", sep="\t")
+
+#Draw the graph
+plot(FoldChange$A, pch=19, col=2)
+points(FoldChange$B, pch=19, col=3)
+points(FoldChange$C, pch=19, col=4)
+colnames(FoldChange)
+
+#### Try#1
+#Comparing FA vs MS as Control vs Test
+Scores_all <- read.table("ScoresMatrix.tex", 
+                         header = TRUE, na.strings = "NA")
+dimnames(Scores_all)[[1]] <- Scores_all[,1]
+Scores_all = Scores_all[,-1]
+t.test(Scores_all[1,1:3], Scores_all[1,4:6])
+y <- t.test(Scores_all[1,1:3], Scores_all[1,4:6])
+dim(Scores_all)
+ttestScores <- function(df, grp1, grp2) {
+  x = df[grp1]
+  y = df[grp2]
+  x = as.numeric(x)
+  y = as.numeric(y)  
+  results = t.test(x, y)
+  results$p.value
+}
+rawpvalue = apply(Scores_all, 1, ttestScores, grp1 = c(1:3), grp2 = c(4:6))
+hist(rawpvalue)
+##transform our data into log2 base.
+Scores_all = log2(Scores_all)
+
+#calculate the mean of each gene per control group
+control = apply(Scores_all[,1:3], 1, mean)
+
+#calcuate the mean of each gene per test group
+test = apply(Scores_all[,4:6], 1, mean) 
+
+#confirming that we have a vector of numbers
+class(control) 
+class(test)
+foldchange <- control - test 
+hist(foldchange, xlab = "log2 Fold Change (FA vs MS)")
+results = cbind(foldchange, rawpvalue)
+results = as.data.frame(results)
+results$probename <- rownames(results)
+
+volcano = ggplot(data = results, aes(x = foldchange, y = -1*log10(rawpvalue)))
+volcano + geom_point()
+
+####
+#Adjusting the Control vs Testing conditions
+#using A vs B
+#dim(Scores_all)
+Scores_all <- read.table("ScoresMatrix.tex", 
+                         header = TRUE, na.strings = "NA")
+
+class(Scores_all)
+summary(Scores_all)
+A1<- Scores_all[,2]
+A2<- Scores_all[,5]
+B1<- Scores_all[,3]
+B2<- Scores_all[,6]
+ProteinID <- Scores_all$ProteinID
+
+AvsB <- cbind.data.frame(ProteinID, A1, A2, B1, B2)
+
+dimnames(AvsB)[[1]] <- AvsB[,1]
+AvsB = AvsB[,-1]
+
+t.test(AvsB[1,1:2], AvsB[1,3:4])
+y <- t.test(AvsB[1,1:2], AvsB[1,3:4])
+dim(AvsB)
+ttestScores <- function(df, grp1, grp2) {
+  x = df[grp1]
+  y = df[grp2]
+  x = as.numeric(x)
+  y = as.numeric(y)  
+  results = t.test(x, y)
+  results$p.value
+}
+rawpvalue = apply(AvsB, 1, ttestScores, grp1 = c(1:2), grp2 = c(3:4))
+hist(rawpvalue)
+##transform our data into log2 base.
+AvsB = log2(AvsB)
+
+#calculate the mean of each gene per control group
+control = apply(AvsB[,1:2], 1, mean)
+
+#calcuate the mean of each gene per test group
+test = apply(AvsB[,3:4], 1, mean) 
+
+#confirming that we have a vector of numbers
+class(control) 
+class(test)
+foldchange <- control - test 
+hist(foldchange, xlab = "log2 Fold Change (A vs B)")
+results = cbind(foldchange, rawpvalue)
+results = as.data.frame(results)
+results$probename <- rownames(results)
+
+volcano = ggplot(data = results, aes(x = foldchange, y = -1*log10(rawpvalue)))
+volcano + geom_point()
+
+#How to sor/order your Proteins according to the max/min foldchange or rawpvalue
+resorder <- results[order(-rawpvalue),]
+resorder <- results[order(foldchange, rawpvalue),]
+#show the best 10
+resorder[1:10,]
+
+#Plot the volcano plot hightligting the proteins of intererst
+
+plot(results$foldchange, results$rawpvalue, pch=16, cex=0.7, col=8,
+     main="AvsB", xlab ="Fold Change", ylab = "p-value", cex.lab=1.5, 
+     cex.axis=1.2, ylim=rev(range(c(1:0))))
+points(results[45,1:2], pch=16, col="blue", cex=1.5) #RPUSD2
+points(results[991,1:2], pch=16, col="blue", cex=1.5) #GAR1
+points(results[215,1:2],pch=16, col="blue", cex=1.5) #PUS7
+points(results[1741,1:2],pch=16, col="blue", cex=1.5) #NHP2
+points(results[731,1:2], pch=16, col="blue", cex=1.5) #DKC1
+points(results[1776,1:2], pch=16, col="blue", cex=1.5) #NOP10
+
+#####
+
+#Adjusting the Control vs Testing conditions
+#using A vs C
+#dim(Scores_all)
+A1<- Scores_all[,2]
+A2<- Scores_all[,5]
+C1<- Scores_all[,4]
+C2<- Scores_all[,7]
+ProteinID <- Scores_all$ProteinID
+
+AvsC <- cbind.data.frame(ProteinID, A1, A2, C1, C2)
+
+dimnames(AvsC)[[1]] <- AvsC[,1]
+AvsC = AvsC[,-1]
+
+t.test(AvsC[1,1:2], AvsC[1,3:4])
+y <- t.test(AvsC[1,1:2], AvsC[1,3:4])
+dim(AvsC)
+ttestScores <- function(df, grp1, grp2) {
+  x = df[grp1]
+  y = df[grp2]
+  x = as.numeric(x)
+  y = as.numeric(y)  
+  results = t.test(x, y)
+  results$p.value
+}
+rawpvalue = apply(AvsC, 1, ttestScores, grp1 = c(1:2), grp2 = c(3:4))
+hist(rawpvalue)
+##transform our data into log2 base.
+AvsC = log2(AvsC)
+
+#calculate the mean of each gene per control group
+control = apply(AvsC[,1:2], 1, mean)
+
+#calcuate the mean of each gene per test group
+test = apply(AvsC[,3:4], 1, mean) 
+
+#confirming that we have a vector of numbers
+class(control) 
+class(test)
+foldchange <- control - test 
+hist(foldchange, xlab = "log2 Fold Change (A vs C)")
+results = cbind(foldchange, rawpvalue)
+results = as.data.frame(results)
+results$probename <- rownames(results)
+
+#volcano = ggplot(data = results, aes(x = foldchange, y = -1*log10(rawpvalue)))
+#volcano + geom_point()
+
+plot(results$foldchange, results$rawpvalue, pch=16, cex=0.7, col=8,
+     main="AvsC", xlab ="Fold Change", ylab = "p-value", cex.lab=1.5, 
+     cex.axis=1.2, ylim=rev(range(c(1:0))))
+points(results[45,1:2], pch=16, col="blue", cex=1.5) #RPUSD2
+points(results[991,1:2], pch=16, col="blue", cex=1.5) #GAR1
+points(results[215,1:2],pch=16, col="blue", cex=1.5) #PUS7
+points(results[1741,1:2],pch=16, col="blue", cex=1.5) #NHP2
+points(results[731,1:2], pch=16, col="blue", cex=1.5) #DKC1
+points(results[1776,1:2], pch=16, col="blue", cex=1.5) #NOP10
+
+######
+
+#Adjusting the Control vs Testing conditions
+#using B vs C
+#dim(Scores_all)  #B is C to evaluate CvsB instead of BvsC
+B1<- Scores_all[,4]
+B2<- Scores_all[,7]
+C1<- Scores_all[,3]
+C2<- Scores_all[,6]
+ProteinID <- Scores_all$ProteinID
+
+BvsC <- cbind.data.frame(ProteinID, B1, B2, C1, C2)
+
+dimnames(BvsC)[[1]] <- BvsC[,1]
+BvsC = BvsC[,-1]
+
+t.test(BvsC[1,1:2], BvsC[1,3:4])
+y <- t.test(BvsC[1,1:2], BvsC[1,3:4])
+dim(BvsC)
+ttestScores <- function(df, grp1, grp2) {
+  x = df[grp1]
+  y = df[grp2]
+  x = as.numeric(x)
+  y = as.numeric(y)  
+  results = t.test(x, y)
+  results$p.value
+}
+rawpvalue = apply(BvsC, 1, ttestScores, grp1 = c(1:2), grp2 = c(3:4))
+hist(rawpvalue)
+##transform our data into log2 base.
+BvsC = log2(BvsC)
+
+#calculate the mean of each gene per control group
+control = apply(BvsC[,1:2], 1, mean)
+
+#calcuate the mean of each gene per test group
+test = apply(BvsC[,3:4], 1, mean) 
+
+#confirming that we have a vector of numbers
+class(control) 
+class(test)
+foldchange <- control - test 
+hist(foldchange, xlab = "log2 Fold Change (B vs C)")
+results = cbind(foldchange, rawpvalue)
+results = as.data.frame(results)
+results$probename <- rownames(results)
+
+plot(results$foldchange, results$rawpvalue, pch=16, cex=0.7, col=8,
+     main="CvsB", xlab ="Fold Change", ylab = "p-value", cex.lab=1.5, 
+     cex.axis=1.2, ylim=rev(range(c(1:0))))
+points(results[45,1:2], pch=16, col="blue", cex=1.5) #RPUSD2
+points(results[991,1:2], pch=16, col="blue", cex=1.5) #GAR1
+points(results[215,1:2],pch=16, col="blue", cex=1.5) #PUS7
+points(results[1741,1:2],pch=16, col="blue", cex=1.5) #NHP2
+points(results[731,1:2], pch=16, col="blue", cex=1.5) #DKC1
+points(results[1776,1:2], pch=16, col="blue", cex=1.5) #NOP10
+
+
+volcano = ggplot(data = results, aes(x = foldchange, y = -1*log10(rawpvalue)))
+volcano + geom_point()
+
+plot(results[,1:2], pch=16, main="BvsC", col="grey")
+points(results[45,1:2], pch=16, col="blue", cex=1.5) #RPUSD2
+points(results[991,1:2], pch=16, col="blue", cex=1.5) #GAR1
+points(results[215,1:2],pch=16, col="blue", cex=1.5) #PUS7
+points(results[1741,1:2],pch=16, col="blue", cex=1.5) #NHP2
+points(results[731,1:2], pch=16, col="blue", cex=1.5) #DKC1
+points(results[1776,1:2], pch=16, col="blue", cex=1.5) #NOP10
+
+
+######
